@@ -13,11 +13,14 @@ declare(strict_types=1);
 
 namespace ApiPlatform\Laravel\Eloquent\Filter;
 
+use ApiPlatform\Metadata\JsonSchemaFilterInterface;
+use ApiPlatform\Metadata\OpenApiParameterFilterInterface;
 use ApiPlatform\Metadata\Parameter;
+use ApiPlatform\OpenApi\Model\Parameter as OpenApiParameter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
-final class PartialSearchFilter implements FilterInterface
+final class PartialSearchFilter implements FilterInterface, JsonSchemaFilterInterface, OpenApiParameterFilterInterface
 {
     use QueryPropertyTrait;
 
@@ -27,6 +30,38 @@ final class PartialSearchFilter implements FilterInterface
      */
     public function apply(Builder $builder, mixed $values, Parameter $parameter, array $context = []): Builder
     {
+        if (!\is_string($values)) {
+            $properties = $parameter->getExtraProperties()['_properties'] ?? [];
+
+            foreach ($values as $key => $value) {
+                if (!isset($properties[$key])) {
+                    continue;
+                }
+                $builder = $builder->{$context['whereClause'] ?? 'where'}($properties[$key], 'like', '%'.$value.'%');
+            }
+
+            return $builder;
+        }
         return $builder->{$context['whereClause'] ?? 'where'}($this->getQueryProperty($parameter), 'like', '%'.$values.'%');
+    }
+
+    public function getSchema(Parameter $parameter): array
+    {
+        return ['type' => 'string'];
+    }
+
+    public function getOpenApiParameters(Parameter $parameter): OpenApiParameter|array|null
+    {
+        if (str_contains($parameter->getKey(), ':property')) {
+            $parameters = [];
+            $key = str_replace('[:property]', '', $parameter->getKey());
+            foreach (array_keys($parameter->getExtraProperties()['_properties'] ?? []) as $property) {
+                $parameters[] = new OpenApiParameter(name: \sprintf('%s[%s]', $key, $property), in: 'query');
+            }
+
+            return $parameters;
+        }
+
+        return null;
     }
 }
